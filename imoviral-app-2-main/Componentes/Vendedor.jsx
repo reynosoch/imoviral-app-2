@@ -386,6 +386,14 @@ export default function Vendedor({ onVolver, propiedadParaEditar, onVerPropiedad
     return false;
   };
 
+  const canGoToStep = (targetStep) => {
+    if (targetStep <= step) return true;
+    for (let i = 1; i < targetStep; i++) {
+      if (!isStepValid(i)) return false;
+    }
+    return true;
+  };
+
   const canNext = () => {
     if (step === 1) return isStepValid(1);
     if (step === 2) return isStepValid(2);
@@ -538,6 +546,22 @@ export default function Vendedor({ onVolver, propiedadParaEditar, onVerPropiedad
     if (step === 4) {
       if (!form.nombre.trim()) errors.nombre = true;
       if (!form.telefono.trim()) errors.telefono = true;
+
+      if (!isStepValid(1)) {
+        setErrorMessage(t('error_paso_1_missing', {defaultValue: 'Faltan campos obligatorios en el Paso 1.'}));
+        setStep(1);
+        return;
+      }
+      if (!isStepValid(2)) {
+        setErrorMessage(t('error_paso_2_missing', {defaultValue: 'Faltan campos obligatorios en el Paso 2.'}));
+        setStep(2);
+        return;
+      }
+      if (!isStepValid(3)) {
+        setErrorMessage(t('error_paso_3_missing', {defaultValue: 'Por favor selecciona al menos 1 amenidad en el Paso 3.'}));
+        setStep(3);
+        return;
+      }
 
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors);
@@ -719,21 +743,27 @@ Contacto: ${form.nombre} (${form.lada} ${form.telefono})`
               <View style={s.progressRow}>
                 {WIZARD_STEPS.map((sItem, idx) => {
                   const isHovered = hoveredStep === sItem.n;
-                  const canNavigate = true;
+                  const canNavigate = canGoToStep(sItem.n);
                   const isValid = isStepValid(sItem.n);
                   const isDoneOrActive = step === sItem.n || isValid;
                   return (
                   <React.Fragment key={sItem.n}>
                     <Pressable 
-                      style={[s.progressStepUnit, isHovered && canNavigate && { transform: [{ scale: 1.05 }] }]}
-                      onPress={() => setStep(sItem.n)}
-                      onMouseEnter={() => Platform.OS === 'web' && setHoveredStep(sItem.n)}
+                      style={[s.progressStepUnit, isHovered && canNavigate && { transform: [{ scale: 1.05 }] }, !canNavigate && { opacity: 0.35 }]}
+                      onPress={() => {
+                        if (canNavigate) {
+                          setStep(sItem.n);
+                        } else {
+                          setErrorMessage(t('validate_previous_steps', { defaultValue: 'Por favor completa los pasos anteriores antes de continuar.' }));
+                        }
+                      }}
+                      onMouseEnter={() => Platform.OS === 'web' && canNavigate && setHoveredStep(sItem.n)}
                       onMouseLeave={() => Platform.OS === 'web' && setHoveredStep(null)}
                     >
-                      <View style={[s.progressCircle, step === sItem.n && s.progressCircleActive, isDoneOrActive && step !== sItem.n && s.progressCircleDone, isHovered && { borderColor: T.goldLight }]}>
-                        <Text style={[s.progressCircleText, step === sItem.n && s.progressCircleTextActive, isDoneOrActive && step !== sItem.n && s.progressCircleTextDone, isHovered && { color: T.goldLight }]}>{isValid && step !== sItem.n ? '✓' : sItem.n}</Text>
+                      <View style={[s.progressCircle, step === sItem.n && s.progressCircleActive, isDoneOrActive && step !== sItem.n && s.progressCircleDone, isHovered && canNavigate && { borderColor: T.goldLight }]}>
+                        <Text style={[s.progressCircleText, step === sItem.n && s.progressCircleTextActive, isDoneOrActive && step !== sItem.n && s.progressCircleTextDone, isHovered && canNavigate && { color: T.goldLight }]}>{isValid && step !== sItem.n ? '✓' : sItem.n}</Text>
                       </View>
-                      <Text style={[s.progressStepLabel, isDoneOrActive && s.progressStepLabelActive, isHovered && { color: T.goldLight }]}>{sItem.label}</Text>
+                      <Text style={[s.progressStepLabel, isDoneOrActive && s.progressStepLabelActive, isHovered && canNavigate && { color: T.goldLight }]}>{sItem.label}</Text>
                     </Pressable>
                     {idx < WIZARD_STEPS.length - 1 && <View style={[s.progressLine, isValid && s.progressLineActive]} />}
                   </React.Fragment>

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Platform,
   Pressable,
@@ -15,7 +16,47 @@ import {
 import { FontAwesome, Feather } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../AuthContext.js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { submitRequest } from './systemSync';
+
+const storeHiddenRoom = async (userId, roomId) => {
+  try {
+    const key = `hidden_rooms_${userId}`;
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      const rooms = val ? JSON.parse(val) : [];
+      if (!rooms.includes(roomId)) {
+        rooms.push(roomId);
+        localStorage.setItem(key, JSON.stringify(rooms));
+      }
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      const rooms = val ? JSON.parse(val) : [];
+      if (!rooms.includes(roomId)) {
+        rooms.push(roomId);
+        await AsyncStorage.setItem(key, JSON.stringify(rooms));
+      }
+    }
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+const getHiddenRooms = async (userId) => {
+  try {
+    const key = `hidden_rooms_${userId}`;
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    }
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+};
 
 const ADMIN_ID = 'admin-id-0000';
 const ADMIN_NAME = 'Administrador INMOVIRAL';
@@ -90,7 +131,7 @@ function RoomItem({ room, isActive, onPress, currentUserId, isAdmin, onDelete })
       </View>
       <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 6, paddingRight: 8 }}>
         <Text style={s.roomDate}>{formatRoomDate(room.ultimo_mensaje_at)}</Text>
-        {isAdmin && (
+        {onDelete && (
           <Pressable
             onPress={(e) => {
               e.stopPropagation();
@@ -134,7 +175,8 @@ function MessageBubble({ msg, isOwn, canDelete, onDelete }) {
 }
 
 export default function Chat({ initialRoomId, onVolver }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const esES = (i18n.language || 'es').startsWith('es');
   const { user } = useAuth();
   const { width } = useWindowDimensions();
   const isWide = width > 768;
@@ -161,13 +203,50 @@ export default function Chat({ initialRoomId, onVolver }) {
   const [modReqReason, setModReqReason] = useState('');
   const [modReqTarget, setModReqTarget] = useState(null); // { type: 'room'|'message', data: {...} }
 
+  const ejecutarEliminarRoom = async (room) => {
+    try {
+      const isNormalUser = !isAdmin && !isModerator;
+      if (isNormalUser) {
+        await storeHiddenRoom(user.id, room.id);
+        setRooms(prev => prev.filter(r => r.id !== room.id));
+        if (activeRoom?.id === room.id) {
+          setActiveRoom(null);
+          setMessages([]);
+        }
+      } else {
+        await supabase.from('chat_messages').delete().eq('room_id', room.id);
+        await supabase.from('chat_rooms').delete().eq('id', room.id);
+        setRooms(prev => prev.filter(r => r.id !== room.id));
+        if (activeRoom?.id === room.id) {
+          setActiveRoom(null);
+          setMessages([]);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error al eliminar la conversación.');
+    }
+  };
+
   // ── Admin delete (password confirmed) ────────────────────────────────────
   const initiateDeleteRoom = (room) => {
-    if (isModerator && !isAdmin) {
-      // Moderator → reason modal
-      setModReqTarget({ type: 'room', data: room });
-      setModReqReason('');
-      setModReqVisible(true);
+    const isNormalUser = !isAdmin && !isModerator;
+    if ((isModerator && !isAdmin) || isNormalUser) {
+      const msgConfirm = t('chat.confirm_delete_room', { defaultValue: '¿Estás seguro de que deseas eliminar esta conversación?' });
+      if (Platform.OS === 'web') {
+        if (window.confirm(msgConfirm)) {
+          ejecutarEliminarRoom(room);
+        }
+      } else {
+        Alert.alert(
+          t('chat.confirm_title', { defaultValue: 'Confirmar eliminación' }),
+          msgConfirm,
+          [
+            { text: t('reviews.form_cancel', { defaultValue: 'Cancelar' }), style: 'cancel' },
+            { text: t('chat.confirm_btn', { defaultValue: 'Confirmar' }), onPress: () => ejecutarEliminarRoom(room), style: 'destructive' }
+          ]
+        );
+      }
       return;
     }
     setRoomToDelete(room);
@@ -197,12 +276,36 @@ export default function Chat({ initialRoomId, onVolver }) {
     }
   };
 
+  const ejecutarEliminarMessage = async (msg) => {
+    try {
+      const { error } = await supabase
+        .from('chat_messages').delete().eq('id', msg.id);
+      if (error) throw error;
+      setMessages(prev => prev.filter(m => m.id !== msg.id));
+    } catch (e) {
+      console.error(e);
+      alert('Error al eliminar el mensaje.');
+    }
+  };
+
   // ── Individual message delete ─────────────────────────────────────────────
   const initiateDeleteMessage = (msg) => {
     if (isModerator && !isAdmin) {
-      setModReqTarget({ type: 'message', data: msg });
-      setModReqReason('');
-      setModReqVisible(true);
+      const msgConfirm = t('chat.confirm_delete_msg', { defaultValue: '¿Estás seguro de que deseas eliminar este mensaje?' });
+      if (Platform.OS === 'web') {
+        if (window.confirm(msgConfirm)) {
+          ejecutarEliminarMessage(msg);
+        }
+      } else {
+        Alert.alert(
+          t('chat.confirm_title', { defaultValue: 'Confirmar eliminación' }),
+          msgConfirm,
+          [
+            { text: t('reviews.form_cancel', { defaultValue: 'Cancelar' }), style: 'cancel' },
+            { text: t('chat.confirm_btn', { defaultValue: 'Confirmar' }), onPress: () => ejecutarEliminarMessage(msg), style: 'destructive' }
+          ]
+        );
+      }
       return;
     }
     // Admin → direct delete with password (reuse password modal)
@@ -275,17 +378,25 @@ export default function Chat({ initialRoomId, onVolver }) {
     setLoadingRooms(true);
     try {
       let query = supabase.from('chat_rooms').select('*').order('ultimo_mensaje_at', { ascending: false });
-      if (!isAdmin) {
+      if (!isAdmin && !isModerator) {
         query = query.or(`comprador_id.eq.${user.id},vendedor_id.eq.${user.id}`);
       }
       const { data, error } = await query;
-      if (!error && data) setRooms(data);
+      if (!error && data) {
+        const isNormalUser = !isAdmin && !isModerator;
+        if (isNormalUser) {
+          const hidden = await getHiddenRooms(user.id);
+          setRooms(data.filter(r => !hidden.includes(r.id)));
+        } else {
+          setRooms(data);
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
       setLoadingRooms(false);
     }
-  }, [user, isAdmin]);
+  }, [user, isAdmin, isModerator]);
 
   const cargarMensajes = useCallback(async (roomId) => {
     if (!roomId) return;
@@ -434,7 +545,7 @@ export default function Chat({ initialRoomId, onVolver }) {
               isActive={activeRoom?.id === room.id}
               onPress={() => openRoom(room)}
               currentUserId={user.id}
-              isAdmin={isAdmin}
+              isAdmin={isAdmin || isModerator}
               onDelete={initiateDeleteRoom}
             />
           ))}
@@ -464,9 +575,18 @@ export default function Chat({ initialRoomId, onVolver }) {
 
       {/* Messages */}
       {!activeRoom ? (
-        <View style={s.pageCenter}>
-          <Feather name="message-circle" size={48} color="rgba(160,120,64,0.2)" />
-          <Text style={s.emptyText}>{t('chat.no_messages')}</Text>
+        <View style={[s.pageCenter, { backgroundColor: '#070707', borderWidth: 1, borderColor: 'rgba(160, 120, 64, 0.1)', margin: 20, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(160, 120, 64, 0.05)', justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: 'rgba(160, 120, 64, 0.15)' }}>
+            <Feather name="message-square" size={32} color={T.gold} />
+          </View>
+          <Text style={{ fontFamily: T.serif, fontSize: 22, color: '#fff', letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' }}>
+            {i18n.language === 'es' ? 'Bandeja de Entrada' : 'Inbox'}
+          </Text>
+          <Text style={{ color: T.textSub, fontSize: 13, fontFamily: T.sans, textAlign: 'center', maxWidth: 320, lineHeight: 20 }}>
+            {i18n.language === 'es'
+              ? 'Selecciona una conversación de la lista de la izquierda para comenzar a chatear o envía una consulta directa desde el detalle de una propiedad.' 
+              : 'Select a conversation from the list on the left to start chatting or send a direct inquiry from a listing details page.'}
+          </Text>
         </View>
       ) : loadingMsgs ? (
         <View style={s.pageCenter}><ActivityIndicator color={T.gold} /></View>
@@ -478,8 +598,13 @@ export default function Chat({ initialRoomId, onVolver }) {
           showsVerticalScrollIndicator={false}
         >
           {messages.length === 0 && (
-            <View style={s.pageCenter}>
-              <Text style={s.emptyText}>{t('chat.no_messages')}</Text>
+            <View style={[s.pageCenter, { flex: 1, paddingVertical: 40, justifyContent: 'center', alignItems: 'center' }]}>
+              <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(160, 120, 64, 0.03)', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+                <Feather name="send" size={24} color="rgba(160,120,64,0.3)" />
+              </View>
+              <Text style={{ color: T.textSub, fontSize: 13, fontFamily: T.sans, textAlign: 'center', fontStyle: 'italic' }}>
+                {i18n.language === 'es' ? 'Envía un mensaje para comenzar la conversación.' : 'Send a message to start the conversation.'}
+              </Text>
             </View>
           )}
           {messages.map(msg => (
@@ -527,7 +652,7 @@ export default function Chat({ initialRoomId, onVolver }) {
 
   // Responsive layout
   return (
-    <View style={{ flex: 1 }}>
+    <View style={[{ flex: 1 }, Platform.OS === 'web' && { height: '100vh', maxHeight: '100vh', overflow: 'hidden' }]}>
       {isWide ? (
         <View style={s.splitLayout}>
           {renderRoomsList()}
@@ -642,7 +767,15 @@ Chat.crearSala = async (propiedad, compradorUser) => {
 const s = StyleSheet.create({
   page: { flex: 1, backgroundColor: T.bg },
   pageCenter: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 16 },
-  splitLayout: { flex: 1, flexDirection: 'row', backgroundColor: T.bg },
+  splitLayout: { 
+    flex: 1, 
+    flexDirection: 'row', 
+    backgroundColor: T.bg,
+    ...Platform.select({
+      web: { height: '100vh', maxHeight: '100vh' },
+      default: {}
+    })
+  },
 
   // List Panel
   listPanel: { flex: 1, backgroundColor: T.bgAlt },

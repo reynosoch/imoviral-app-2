@@ -16,7 +16,7 @@ import { Feather, FontAwesome } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../AuthContext.js';
-import { fetchModerators, saveModerators, fetchRequests, saveRequests, updateRequestStatus, fetchUsers, saveUsers, forceSyncFromSupabase } from './systemSync';
+import { fetchModerators, saveModerators, fetchRequests, saveRequests, updateRequestStatus, fetchUsers, saveUsers, forceSyncFromSupabase, upsertUser, submitRequest } from './systemSync';
 
 const T = {
   gold: '#A07840',
@@ -91,6 +91,23 @@ export default function Perfil({ onVolver }) {
   const [editNombre, setEditNombre] = useState('');
   const [editTelefono, setEditTelefono] = useState('');
   const [editTipo, setEditTipo] = useState('');
+
+  const [currentUserReg, setCurrentUserReg] = useState(null);
+
+  useEffect(() => {
+    const checkPlusStatus = async () => {
+      if (user) {
+        try {
+          const list = await fetchUsers();
+          const found = list.find(u => u.id === user.id);
+          setCurrentUserReg(found || null);
+        } catch (e) {
+          console.warn("Error checking user plus status in Perfil:", e);
+        }
+      }
+    };
+    checkPlusStatus();
+  }, [user, activeSection]);
 
   useEffect(() => {
     if (user && !hasInitialized.current) {
@@ -430,6 +447,44 @@ export default function Perfil({ onVolver }) {
     }
   };
 
+  const handleCancelSubscription = async () => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(esES ? '¿Estás seguro de que deseas cancelar tu suscripción InmoViral Plus?' : 'Are you sure you want to cancel your InmoViral Plus subscription?')
+      : true;
+    
+    if (!confirmed) return;
+
+    setSaving(true);
+    try {
+      const record = {
+        ...currentUserReg,
+        id: user.id,
+        inmoviralPlus: false,
+        updated_at: new Date().toISOString()
+      };
+      await upsertUser(record);
+      setCurrentUserReg(record);
+
+      await submitRequest({
+        id: 'req-' + Date.now(),
+        action: 'inmoviral_plus_cancel',
+        targetId: user.id,
+        targetName: user.user_metadata?.full_name || user.email || 'Usuario',
+        message: `El usuario canceló su suscripción InmoViral Plus`,
+        status: 'pending'
+      });
+
+      setFeedback(esES ? 'Tu suscripción InmoViral Plus ha sido cancelada.' : 'Your InmoViral Plus subscription has been canceled.');
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (e) {
+      console.error(e);
+      setFeedback(esES ? 'Error al cancelar la suscripción.' : 'Error canceling subscription.');
+      setTimeout(() => setFeedback(''), 3000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const renderDatos = () => (
     <View style={s.sectionContent}>
       <Text style={s.sectionHeading}>{t('profile.section_personal')}</Text>
@@ -457,6 +512,29 @@ export default function Perfil({ onVolver }) {
           )}
         </View>
       </View>
+
+      {/* Badge InmoViral Plus */}
+      {currentUserReg?.inmoviralPlus && (
+        <View style={s.plusBadgeContainer}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Feather name="star" size={15} color={T.gold} style={{ marginRight: 8 }} />
+              <Text style={s.plusBadgeText}>
+                {esES ? 'MIEMBRO INMOVIRAL PLUS' : 'INMOVIRAL PLUS MEMBER'}
+              </Text>
+            </View>
+            <Pressable 
+              style={s.cancelSubBtn} 
+              onPress={handleCancelSubscription}
+              disabled={saving}
+            >
+              <Text style={s.cancelSubBtnText}>
+                {esES ? 'CANCELAR SUSCRIPCIÓN' : 'CANCEL SUBSCRIPTION'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       <View style={s.fieldGroup}>
         <Text style={s.fieldLabel}>{t('profile.label_name')}</Text>
@@ -1320,4 +1398,37 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(59,130,246,0.08)',
   },
   providerBadgeText: { color: '#60A5FA', fontSize: 9, fontFamily: T.sans, fontWeight: '600', letterSpacing: 0.5 },
+  
+  // ── Plus subscription badge ─────────────────────────────────
+  plusBadgeContainer: {
+    backgroundColor: 'rgba(160, 120, 64, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(160, 120, 64, 0.3)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    borderRadius: 2,
+    width: '100%',
+  },
+  plusBadgeText: {
+    color: T.gold,
+    fontSize: 11,
+    fontFamily: T.sans,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+  cancelSubBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(220, 38, 38, 0.4)',
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+  },
+  cancelSubBtnText: {
+    color: '#DC2626',
+    fontSize: 9,
+    fontFamily: T.sans,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
 });

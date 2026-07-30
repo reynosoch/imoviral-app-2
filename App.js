@@ -12,9 +12,11 @@ import {
   Animated,
   Easing,
   useWindowDimensions,
-  Linking
+  Linking,
+  TextInput
 } from 'react-native';
 import { FontAwesome, Feather, FontAwesome5 } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const logoHorizontal = require('./assets/logo-horizontal.png');
 
@@ -45,7 +47,7 @@ import InteractiveMap from './Componentes/InteractiveMap';
 
 import { useAuth, AuthProvider } from './AuthContext.js';
 import { supabase } from './supabaseClient';
-import { fetchUsers } from './Componentes/systemSync';
+import { fetchUsers, fetchModerators } from './Componentes/systemSync';
 
 const LUXURY_FONT = 'Cormorant Garamond, Georgia, serif';
 const SERIF_FONT = Platform.OS === 'ios' ? 'Georgia' : Platform.OS === 'android' ? 'serif' : 'Georgia, serif';
@@ -75,9 +77,110 @@ const formatPrecioHome = (num) => {
   return val.toLocaleString('es-MX', { maximumFractionDigits: 0 });
 };
 
+const getStoredDeletedNotifs = async (userId) => {
+  if (!userId) return [];
+  try {
+    const key = `inmoviral_deleted_notifs_${userId}`;
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    }
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveStoredDeletedNotif = async (userId, notifId) => {
+  if (!userId) return;
+  try {
+    const key = `inmoviral_deleted_notifs_${userId}`;
+    let list = [];
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      if (!list.includes(notifId)) {
+        list.push(notifId);
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      if (!list.includes(notifId)) {
+        list.push(notifId);
+        await AsyncStorage.setItem(key, JSON.stringify(list));
+      }
+    }
+  } catch (e) {}
+};
+
+const saveStoredDeletedNotifsBulk = async (userId, notifIds) => {
+  if (!userId) return;
+  try {
+    const key = `inmoviral_deleted_notifs_${userId}`;
+    let list = [];
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      notifIds.forEach(id => {
+        if (!list.includes(id)) list.push(id);
+      });
+      localStorage.setItem(key, JSON.stringify(list));
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      notifIds.forEach(id => {
+        if (!list.includes(id)) list.push(id);
+      });
+      await AsyncStorage.setItem(key, JSON.stringify(list));
+    }
+  } catch (e) {}
+};
+
+const getStoredReadNotifs = async (userId) => {
+  if (!userId) return [];
+  try {
+    const key = `inmoviral_read_notifs_${userId}`;
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      return val ? JSON.parse(val) : [];
+    }
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveStoredReadNotif = async (userId, notifId) => {
+  if (!userId) return;
+  try {
+    const key = `inmoviral_read_notifs_${userId}`;
+    let list = [];
+    if (Platform.OS === 'web') {
+      const val = localStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      if (!list.includes(notifId)) {
+        list.push(notifId);
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+    } else {
+      const val = await AsyncStorage.getItem(key);
+      list = val ? JSON.parse(val) : [];
+      if (!list.includes(notifId)) {
+        list.push(notifId);
+        await AsyncStorage.setItem(key, JSON.stringify(list));
+      }
+    }
+  } catch (e) {}
+};
+
 /* ─────────────────────────────────────────────
    COMPONENTE DE APLICACIÓN PRINCIPAL
-───────────────────────────────────────────── */
+   ───────────────────────────────────────────── */
 function MainApp() {
   const { t, i18n } = useTranslation();
   const { user, signOut } = useAuth();
@@ -176,6 +279,497 @@ function MainApp() {
   const [notifDropdownAbierto, setNotifDropdownAbierto] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const notifAnim = useRef(new Animated.Value(0)).current;
+
+  const [showNotifRejectModal, setShowNotifRejectModal] = useState(false);
+  const [notifRejectProp, setNotifRejectProp] = useState(null);
+  const [notifRejectReason, setNotifRejectReason] = useState('');
+
+  const [notificaciones, setNotificaciones] = useState([
+    {
+      id: 'welcome',
+      titulo: '¡Bienvenido a Inmoviral!',
+      tituloEn: 'Welcome to Inmoviral!',
+      descripcion: 'Completa tu perfil para aprovechar al máximo las herramientas.',
+      descripcionEn: 'Complete your profile to get the most out of our tools.',
+      created_at: new Date().toISOString(),
+      tipo: 'sistema',
+      leido: false,
+    },
+    {
+      id: 'update',
+      titulo: 'Nueva actualización',
+      tituloEn: 'New Update',
+      descripcion: 'Ya puedes publicar propiedades en el mapa interactivo y ganar visibilidad.',
+      descripcionEn: 'You can now publish properties on the interactive map for more visibility.',
+      created_at: new Date().toISOString(),
+      tipo: 'sistema',
+      leido: false,
+    }
+  ]);
+
+  const handleAprobarPropiedadDesdeNotif = async (notif) => {
+    try {
+      const propId = notif.propiedadId;
+      if (!propId) return;
+      
+      const { error } = await supabase
+        .from('propiedades')
+        .update({ estatus: 'Disponible' })
+        .eq('id', propId);
+        
+      if (error) throw error;
+      
+      setNotificaciones(prev => prev.filter(n => n.id !== notif.id));
+      if (user) await saveStoredDeletedNotif(user.id, notif.id);
+      
+      alert(idiomaActual.startsWith('es') ? 'Propiedad aprobada con éxito.' : 'Property approved successfully.');
+    } catch (err) {
+      console.error(err);
+      alert(idiomaActual.startsWith('es') ? 'Error al aprobar la propiedad.' : 'Error approving property.');
+    }
+  };
+
+  const handleRechazarPropiedadDesdeNotif = (notif) => {
+    setNotifRejectProp(notif);
+    setNotifRejectReason('');
+    setShowNotifRejectModal(true);
+    setNotifDropdownAbierto(false);
+  };
+
+  const confirmRechazoDesdeNotif = async () => {
+    if (!notifRejectReason.trim()) {
+      alert(idiomaActual.startsWith('es') ? 'Por favor ingresa un motivo para el rechazo.' : 'Please enter a reason for the rejection.');
+      return;
+    }
+    if (!notifRejectProp) return;
+    
+    try {
+      const propId = notifRejectProp.propiedadId;
+      if (!propId) return;
+      
+      const formattedStatus = `rechazada|${notifRejectReason.trim()}`;
+      const { error } = await supabase
+        .from('propiedades')
+        .update({ estatus: formattedStatus })
+        .eq('id', propId);
+        
+      if (error) throw error;
+      
+      setNotificaciones(prev => prev.filter(n => n.id !== notifRejectProp.id));
+      if (user) await saveStoredDeletedNotif(user.id, notifRejectProp.id);
+      
+      setShowNotifRejectModal(false);
+      setNotifRejectProp(null);
+      setNotifRejectReason('');
+      
+      alert(idiomaActual.startsWith('es') ? 'Propiedad rechazada con éxito.' : 'Property rejected successfully.');
+    } catch (err) {
+      console.error(err);
+      alert(idiomaActual.startsWith('es') ? 'Error al rechazar la propiedad.' : 'Error rejecting property.');
+    }
+  };
+
+  useEffect(() => {
+    if (!user) {
+      setNotificaciones(prev => prev.filter(n => n.tipo === 'sistema'));
+      return;
+    }
+
+    const cargarNotificacionesMsgs = async () => {
+      try {
+        const isAdmin = user.isAdmin || user.id === 'admin-id-0000';
+        const mods = await fetchModerators();
+        const isModerator = mods.includes(user.id);
+
+        const deletedIds = await getStoredDeletedNotifs(user.id);
+        const readIds = await getStoredReadNotifs(user.id);
+        
+        // Load pending properties for review if admin or moderator
+        if (isAdmin || isModerator) {
+          try {
+            const { data: pendingProps, error: pendingError } = await supabase
+              .from('propiedades')
+              .select('id, titulo, created_at, nombre_contacto')
+              .eq('estatus', 'pendiente');
+              
+            if (!pendingError && pendingProps) {
+              const propNotifs = pendingProps
+                .map(p => ({
+                  id: `review-${p.id}`,
+                  titulo: 'Propiedad pendiente de revisión',
+                  tituloEn: 'Property pending review',
+                  descripcion: `Nueva propiedad: "${p.titulo}" para autorizar.`,
+                  descripcionEn: `New property: "${p.titulo}" for approval.`,
+                  created_at: p.created_at || new Date().toISOString(),
+                  tipo: 'revision',
+                  propiedadId: p.id,
+                  leido: readIds.includes(`review-${p.id}`),
+                }))
+                .filter(n => !deletedIds.includes(n.id));
+              
+              setNotificaciones(prev => {
+                const merged = [...prev];
+                propNotifs.forEach(notif => {
+                  if (!merged.some(n => n.id === notif.id)) {
+                    merged.push(notif);
+                  }
+                });
+                return merged.filter(n => !deletedIds.includes(n.id));
+              });
+            }
+          } catch (pe) {
+            console.error("Error loading pending properties for review:", pe);
+          }
+        }
+
+        // Load seller status notifications
+        try {
+          const { data: userProps, error: userPropsError } = await supabase
+            .from('propiedades')
+            .select('id, titulo, estatus, created_at')
+            .eq('user_id', user.id);
+
+          if (!userPropsError && userProps) {
+            const sellerNotifs = [];
+            userProps.forEach(p => {
+              const isPending = p.estatus === 'pendiente';
+              const isRejected = p.estatus && p.estatus.startsWith('rechazada');
+              const isApproved = p.estatus === 'Disponible';
+
+              if (isPending) {
+                const notifId = `pending-${p.id}`;
+                if (!deletedIds.includes(notifId)) {
+                  sellerNotifs.push({
+                    id: notifId,
+                    titulo: idiomaActual.startsWith('es') ? 'Propiedad pendiente de aprobación' : 'Listing pending approval',
+                    tituloEn: 'Listing pending approval',
+                    descripcion: idiomaActual.startsWith('es')
+                      ? `Tu propiedad "${p.titulo}" está pendiente de aprobación.`
+                      : `Your property "${p.titulo}" is pending approval.`,
+                    descripcionEn: `Your property "${p.titulo}" is pending approval.`,
+                    created_at: p.created_at || new Date().toISOString(),
+                    tipo: 'sistema',
+                    leido: readIds.includes(notifId),
+                  });
+                }
+              } else if (isRejected) {
+                const notifId = `rejected-${p.id}`;
+                if (!deletedIds.includes(notifId)) {
+                  const reason = p.estatus.split('|')[1] || (idiomaActual.startsWith('es') ? 'No especificado' : 'Not specified');
+                  sellerNotifs.push({
+                    id: notifId,
+                    titulo: idiomaActual.startsWith('es') ? 'Propiedad rechazada' : 'Listing rejected',
+                    tituloEn: 'Listing rejected',
+                    descripcion: idiomaActual.startsWith('es')
+                      ? `Tu propiedad "${p.titulo}" fue rechazada. Motivo: ${reason}`
+                      : `Your property "${p.titulo}" was rejected. Reason: ${reason}`,
+                    descripcionEn: `Your property "${p.titulo}" was rejected. Reason: ${reason}`,
+                    created_at: p.created_at || new Date().toISOString(),
+                    tipo: 'sistema',
+                    leido: readIds.includes(notifId),
+                  });
+                }
+              } else if (isApproved) {
+                const notifId = `approved-${p.id}`;
+                if (!deletedIds.includes(notifId)) {
+                  sellerNotifs.push({
+                    id: notifId,
+                    titulo: idiomaActual.startsWith('es') ? 'Propiedad aprobada' : 'Listing approved',
+                    tituloEn: 'Listing approved',
+                    descripcion: idiomaActual.startsWith('es')
+                      ? `Tu propiedad "${p.titulo}" se aprobó y publicó exitosamente.`
+                      : `Your property "${p.titulo}" was approved and published successfully.`,
+                    descripcionEn: `Your property "${p.titulo}" was approved and published successfully.`,
+                    created_at: p.created_at || new Date().toISOString(),
+                    tipo: 'sistema',
+                    leido: readIds.includes(notifId),
+                  });
+                }
+              }
+            });
+
+            setNotificaciones(prev => {
+              const merged = [...prev];
+              sellerNotifs.forEach(notif => {
+                if (!merged.some(n => n.id === notif.id)) {
+                  merged.push(notif);
+                }
+              });
+              return merged.filter(n => !deletedIds.includes(n.id));
+            });
+          }
+        } catch (pe) {
+          console.error("Error loading seller notifications:", pe);
+        }
+
+        let roomsData = [];
+        if (isAdmin || isModerator) {
+          const { data, error } = await supabase.from('chat_rooms').select('id, propiedad_titulo');
+          if (!error && data) roomsData = data;
+        } else {
+          const { data, error } = await supabase.from('chat_rooms').select('id, propiedad_titulo')
+            .or(`comprador_id.eq.${user.id},vendedor_id.eq.${user.id}`);
+          if (!error && data) roomsData = data;
+        }
+
+        if (roomsData.length === 0) return;
+        const roomIds = roomsData.map(r => r.id);
+        
+        const { data: msgs, error: msgsError } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .in('room_id', roomIds)
+          .neq('sender_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (!msgsError && msgs) {
+          const msgNotifs = msgs
+            .map(m => {
+              const room = roomsData.find(r => r.id === m.room_id);
+              const isRead = m.leido || readIds.includes(m.id);
+              return {
+                id: m.id,
+                titulo: `Nuevo mensaje de ${m.sender_name}`,
+                tituloEn: `New message from ${m.sender_name}`,
+                descripcion: `Chat en: ${room?.propiedad_titulo || 'Propiedad'}\n"${m.mensaje}"`,
+                descripcionEn: `Chat in: ${room?.propiedad_titulo || 'Property'}\n"${m.mensaje}"`,
+                created_at: m.created_at,
+                tipo: 'chat',
+                roomId: m.room_id,
+                leido: isRead,
+              };
+            })
+            .filter(n => !deletedIds.includes(n.id));
+
+          setNotificaciones(prev => {
+            const systemNotifs = prev.filter(n => n.tipo === 'sistema' && !deletedIds.includes(n.id));
+            const merged = [...systemNotifs];
+            msgNotifs.forEach(notif => {
+              if (!merged.some(n => n.id === notif.id)) {
+                merged.push(notif);
+              }
+            });
+            return merged.map(n => readIds.includes(n.id) ? { ...n, leido: true } : n);
+          });
+        }
+      } catch (err) {
+        console.error("Error loading chat notifications:", err);
+      }
+    };
+
+    cargarNotificacionesMsgs();
+
+    const channel = supabase.channel('notificaciones_globales')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, async (payload) => {
+        const newMsg = payload.new;
+        if (!newMsg) return;
+        if (newMsg.sender_id === user.id) return;
+
+        const deletedIds = await getStoredDeletedNotifs(user.id);
+        if (deletedIds.includes(newMsg.id)) return;
+
+        const readIds = await getStoredReadNotifs(user.id);
+        const isRead = newMsg.leido || readIds.includes(newMsg.id);
+
+        let roomTitle = 'Propiedad';
+        try {
+          const { data: room, error: roomError } = await supabase
+            .from('chat_rooms')
+            .select('propiedad_titulo')
+            .eq('id', newMsg.room_id)
+            .maybeSingle();
+          if (!roomError && room?.propiedad_titulo) {
+            roomTitle = room.propiedad_titulo;
+          }
+        } catch (e) {
+          console.warn("Could not fetch room title for notification:", e);
+        }
+
+        setNotificaciones(prev => {
+          if (prev.some(n => n.id === newMsg.id)) return prev;
+          const newNotif = {
+            id: newMsg.id,
+            titulo: `Nuevo mensaje de ${newMsg.sender_name}`,
+            tituloEn: `New message from ${newMsg.sender_name}`,
+            descripcion: `Chat en: ${roomTitle}\n"${newMsg.mensaje}"`,
+            descripcionEn: `Chat in: ${roomTitle}\n"${newMsg.mensaje}"`,
+            created_at: newMsg.created_at,
+            tipo: 'chat',
+            roomId: newMsg.room_id,
+            leido: isRead,
+          };
+          return [newNotif, ...prev];
+        });
+      }).subscribe();
+
+    const propChannel = supabase.channel('propiedades_revision')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'propiedades' }, async (payload) => {
+        const newProp = payload.new;
+        if (!newProp) return;
+        
+        // 1. If pending, notify Admin/Moderators
+        if (newProp.estatus === 'pendiente') {
+          const notifId = `review-${newProp.id}`;
+          const deletedIds = await getStoredDeletedNotifs(user?.id);
+          if (deletedIds.includes(notifId)) return;
+
+          const readIds = await getStoredReadNotifs(user?.id);
+          const isRead = readIds.includes(notifId);
+
+          const isAdmin = user?.isAdmin || user?.id === 'admin-id-0000';
+          const mods = await fetchModerators();
+          const isModerator = mods.includes(user?.id);
+
+          if (isAdmin || isModerator) {
+            setNotificaciones(prev => {
+              if (prev.some(n => n.id === notifId)) return prev;
+              const newNotif = {
+                id: notifId,
+                titulo: 'Propiedad pendiente de revisión',
+                tituloEn: 'Property pending review',
+                descripcion: `Nueva propiedad: "${newProp.titulo}" para autorizar.`,
+                descripcionEn: `New property: "${newProp.titulo}" for approval.`,
+                created_at: newProp.created_at || new Date().toISOString(),
+                tipo: 'revision',
+                propiedadId: newProp.id,
+                leido: isRead,
+              };
+              return [newNotif, ...prev];
+            });
+          }
+        }
+        
+        // 2. If inserted property is owned by current user, also show pending notification for user
+        if (newProp.user_id === user?.id) {
+          const notifId = `pending-${newProp.id}`;
+          const deletedIds = await getStoredDeletedNotifs(user?.id);
+          if (deletedIds.includes(notifId)) return;
+          
+          setNotificaciones(prev => {
+            if (prev.some(n => n.id === notifId)) return prev;
+            return [{
+              id: notifId,
+              titulo: idiomaActual.startsWith('es') ? 'Propiedad pendiente de aprobación' : 'Listing pending approval',
+              tituloEn: 'Listing pending approval',
+              descripcion: idiomaActual.startsWith('es')
+                ? `Tu propiedad "${newProp.titulo}" está pendiente de aprobación.`
+                : `Your property "${newProp.titulo}" is pending approval.`,
+              descripcionEn: `Your property "${newProp.titulo}" is pending approval.`,
+              created_at: newProp.created_at || new Date().toISOString(),
+              tipo: 'sistema',
+              leido: false,
+            }, ...prev];
+          });
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'propiedades' }, async (payload) => {
+        const updatedProp = payload.new;
+        if (!updatedProp) return;
+        
+        // A. If status changed to Disponible (approved) and we are admin/moderator, remove the 'review-[id]' notification
+        const isAdmin = user?.isAdmin || user?.id === 'admin-id-0000';
+        const mods = await fetchModerators();
+        const isModerator = mods.includes(user?.id);
+        if ((isAdmin || isModerator) && updatedProp.estatus === 'Disponible') {
+          setNotificaciones(prev => prev.filter(n => n.id !== `review-${updatedProp.id}`));
+        }
+
+        // B. If the logged-in user is the owner of the property
+        if (updatedProp.user_id === user?.id) {
+          const isPending = updatedProp.estatus === 'pendiente';
+          const isRejected = updatedProp.estatus && updatedProp.estatus.startsWith('rechazada');
+          const isApproved = updatedProp.estatus === 'Disponible';
+          
+          const pendingNotifId = `pending-${updatedProp.id}`;
+          const rejectedNotifId = `rejected-${updatedProp.id}`;
+          const approvedNotifId = `approved-${updatedProp.id}`;
+          
+          setNotificaciones(prev => {
+            let nextNotifs = prev.filter(n => n.id !== pendingNotifId && n.id !== rejectedNotifId && n.id !== approvedNotifId);
+            
+            if (isPending) {
+              nextNotifs.unshift({
+                id: pendingNotifId,
+                titulo: idiomaActual.startsWith('es') ? 'Propiedad pendiente de aprobación' : 'Listing pending approval',
+                tituloEn: 'Listing pending approval',
+                descripcion: idiomaActual.startsWith('es')
+                  ? `Tu propiedad "${updatedProp.titulo}" está pendiente de aprobación.`
+                  : `Your property "${updatedProp.titulo}" is pending approval.`,
+                descripcionEn: `Your property "${updatedProp.titulo}" is pending approval.`,
+                created_at: new Date().toISOString(),
+                tipo: 'sistema',
+                leido: false,
+              });
+            } else if (isRejected) {
+              const reason = updatedProp.estatus.split('|')[1] || (idiomaActual.startsWith('es') ? 'No especificado' : 'Not specified');
+              nextNotifs.unshift({
+                id: rejectedNotifId,
+                titulo: idiomaActual.startsWith('es') ? 'Propiedad rechazada' : 'Listing rejected',
+                tituloEn: 'Listing rejected',
+                descripcion: idiomaActual.startsWith('es')
+                  ? `Tu propiedad "${updatedProp.titulo}" fue rechazada. Motivo: ${reason}`
+                  : `Your property "${updatedProp.titulo}" was rejected. Reason: ${reason}`,
+                descripcionEn: `Your property "${updatedProp.titulo}" was rejected. Reason: ${reason}`,
+                created_at: new Date().toISOString(),
+                tipo: 'sistema',
+                leido: false,
+              });
+            } else if (isApproved) {
+              nextNotifs.unshift({
+                id: approvedNotifId,
+                titulo: idiomaActual.startsWith('es') ? 'Propiedad aprobada' : 'Listing approved',
+                tituloEn: 'Listing approved',
+                descripcion: idiomaActual.startsWith('es')
+                  ? `Tu propiedad "${updatedProp.titulo}" se aprobó y publicó exitosamente.`
+                  : `Your property "${updatedProp.titulo}" was approved and published successfully.`,
+                descripcionEn: `Your property "${updatedProp.titulo}" was approved and published successfully.`,
+                created_at: new Date().toISOString(),
+                tipo: 'sistema',
+                leido: false,
+              });
+            }
+            return nextNotifs;
+          });
+        }
+      }).subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      supabase.removeChannel(propChannel);
+    };
+  }, [user]);
+
+  const handleNotifPress = async (notif) => {
+    setNotificaciones(prev => prev.map(n => n.id === notif.id ? { ...n, leido: true } : n));
+    if (user) {
+      await saveStoredReadNotif(user.id, notif.id);
+    }
+    if (notif.tipo === 'chat' && notif.roomId) {
+      setChatRoomId(notif.roomId);
+      setVista('chat');
+      setNotifDropdownAbierto(false);
+    } else if (notif.tipo === 'revision' && notif.propiedadId) {
+      setPropiedadSeleccionada(notif.propiedadId);
+      setVista('propiedad');
+      setNotifDropdownAbierto(false);
+    }
+  };
+
+  const borrarNotificacion = async (id) => {
+    setNotificaciones(prev => prev.filter(n => n.id !== id));
+    if (user) {
+      await saveStoredDeletedNotif(user.id, id);
+    }
+  };
+
+  const borrarTodasLasNotificaciones = async () => {
+    const ids = notificaciones.map(n => n.id);
+    setNotificaciones([]);
+    if (user) {
+      await saveStoredDeletedNotifsBulk(user.id, ids);
+    }
+  };
 
   useEffect(() => {
     if (notifDropdownAbierto) {
@@ -291,10 +885,23 @@ function MainApp() {
   useEffect(() => {
     const cargarCasas = async () => {
       const { data, error } = await supabase.from('propiedades').select('*').order('created_at', { ascending: false });
-      if (!error && data) setPropiedades(data);
+      if (!error && data) {
+        const isAdmin = user?.isAdmin || user?.email === 'ventas@inmoviral.com.mx' || user?.id === 'admin-id-0000';
+        const mods = await fetchModerators();
+        const isModerator = mods.includes(user?.id);
+
+        const filtered = data.filter(p => {
+          const isAvailable = !p.estatus || p.estatus === 'Disponible';
+          if (isAvailable) return true;
+          if (isAdmin || isModerator) return true;
+          if (user && p.user_id === user.id) return true;
+          return false;
+        });
+        setPropiedades(filtered);
+      }
     };
     cargarCasas();
-  }, [vista]);
+  }, [vista, user]);
 
   useEffect(() => {
     if (user && vista === 'login') {
@@ -315,6 +922,11 @@ function MainApp() {
     const styleTag = document.createElement('style');
     styleTag.textContent = `
       @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&display=swap');
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #060606 !important;
+      }
       * { transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.35s ease, opacity 0.35s ease; }
       @keyframes couturePulse {
         0% { box-shadow: 0 0 0 0 rgba(160, 120, 64, 0.4); transform: scale(1); }
@@ -376,26 +988,212 @@ function MainApp() {
             <View style={{ position: 'relative', zIndex: 100 }}>
               <TouchableOpacity onPress={() => setNotifDropdownAbierto(!notifDropdownAbierto)} style={{ position: 'relative', padding: 4 }}>
                 <FontAwesome5 name="bell" size={16} color={_navbarTransparent ? '#fff' : '#A07840'} />
-                <View style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1, borderColor: _navbarTransparent ? 'transparent' : '#060606' }} />
+                {notificaciones.some(n => !n.leido) && (
+                  <View style={{ position: 'absolute', top: 0, right: -2, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#EF4444', borderWidth: 1.5, borderColor: _navbarTransparent ? 'rgba(0,0,0,0.4)' : '#060606', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
+                    <Text style={{ color: '#fff', fontSize: 8, fontWeight: '800' }}>{notificaciones.filter(n => !n.leido).length}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
               
               {showNotifMenu && (
                 <Animated.View style={{ 
-                  position: 'absolute', top: 32, right: -10, backgroundColor: '#111', borderWidth: 1, borderColor: 'rgba(160,120,64,0.3)', borderRadius: 4, width: 240, overflow: 'hidden',
+                  position: 'absolute', top: 32, right: -10, backgroundColor: '#111', borderWidth: 1, borderColor: 'rgba(160,120,64,0.3)', borderRadius: 4, width: 280, overflow: 'hidden',
                   opacity: notifAnim,
                   transform: [{ translateY: notifAnim.interpolate({ inputRange: [0, 1], outputRange: [-5, 0] }) }]
                 }}>
-                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                    {idiomaActual.startsWith('es') ? 'Notificaciones' : 'Notifications'}
-                  </Text>
-                  <TouchableOpacity style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(160,120,64,0.05)' }}>
-                    <Text style={{ color: '#A07840', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>{idiomaActual.startsWith('es') ? '¡Bienvenido a Inmoviral!' : 'Welcome to Inmoviral!'}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 10, lineHeight: 14 }}>{idiomaActual.startsWith('es') ? 'Completa tu perfil para aprovechar al máximo las herramientas.' : 'Complete your profile to get the most out of our tools.'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ padding: 12 }}>
-                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>{idiomaActual.startsWith('es') ? 'Nueva actualización' : 'New Update'}</Text>
-                    <Text style={{ color: '#aaa', fontSize: 10, lineHeight: 14 }}>{idiomaActual.startsWith('es') ? 'Ya puedes publicar propiedades en el mapa interactivo y ganar visibilidad.' : 'You can now publish properties on the interactive map for more visibility.'}</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)', backgroundColor: '#151515' }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                      {idiomaActual.startsWith('es') ? 'Notificaciones' : 'Notifications'}
+                    </Text>
+                    {notificaciones.length > 0 && (
+                      <TouchableOpacity onPress={borrarTodasLasNotificaciones} style={{ padding: 2 }}>
+                        <Text style={{ color: '#C05050', fontSize: 9, fontWeight: '600' }}>
+                          {idiomaActual.startsWith('es') ? 'BORRAR TODAS' : 'CLEAR ALL'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                    {(() => {
+                      const isAdminOrMod = user?.isAdmin || user?.isModerator || user?.email === 'ventas@inmoviral.com.mx';
+                      const pendientes = notificaciones.filter(n => n.tipo === 'revision');
+                      const regulares = notificaciones.filter(n => n.tipo !== 'revision');
+                      
+                      return (
+                        <>
+                          {/* ═══ SECCIÓN: PENDIENTES DE APROBACIÓN (solo admin/mod) ═══ */}
+                          {isAdminOrMod && pendientes.length > 0 && (
+                            <View>
+                              <View style={{ 
+                                flexDirection: 'row', 
+                                alignItems: 'center', 
+                                justifyContent: 'space-between',
+                                paddingVertical: 8, 
+                                paddingHorizontal: 12, 
+                                backgroundColor: 'rgba(160,120,64,0.08)',
+                                borderBottomWidth: 1,
+                                borderBottomColor: 'rgba(160,120,64,0.15)',
+                              }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <FontAwesome5 name="clipboard-check" size={10} color="#A07840" />
+                                  <Text style={{ color: '#A07840', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                                    {idiomaActual.startsWith('es') ? 'Pendientes de Aprobación' : 'Pending Approval'}
+                                  </Text>
+                                </View>
+                                <View style={{ 
+                                  backgroundColor: '#A07840', 
+                                  borderRadius: 8, 
+                                  minWidth: 18, 
+                                  height: 18, 
+                                  alignItems: 'center', 
+                                  justifyContent: 'center',
+                                  paddingHorizontal: 5,
+                                }}>
+                                  <Text style={{ color: '#000', fontSize: 9, fontWeight: '800' }}>{pendientes.length}</Text>
+                                </View>
+                              </View>
+                              {pendientes.map((notif, idx) => (
+                                <TouchableOpacity 
+                                  key={notif.id || idx}
+                                  onPress={() => handleNotifPress(notif)}
+                                  style={{ 
+                                    paddingVertical: 10,
+                                    paddingHorizontal: 12,
+                                    borderBottomWidth: 1, 
+                                    borderBottomColor: 'rgba(160,120,64,0.08)', 
+                                    backgroundColor: !notif.leido ? 'rgba(160,120,64,0.06)' : 'transparent',
+                                    borderLeftWidth: 3,
+                                    borderLeftColor: '#A07840',
+                                  }}
+                                >
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ color: !notif.leido ? '#A07840' : '#fff', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>
+                                      {idiomaActual.startsWith('es') ? notif.titulo : notif.tituloEn}
+                                    </Text>
+                                    <Text style={{ color: '#aaa', fontSize: 10, lineHeight: 14 }}>
+                                      {idiomaActual.startsWith('es') ? notif.descripcion : notif.descripcionEn}
+                                    </Text>
+                                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                                      <TouchableOpacity
+                                        onPress={async (e) => {
+                                          e.stopPropagation();
+                                          await handleAprobarPropiedadDesdeNotif(notif);
+                                        }}
+                                        style={{
+                                          backgroundColor: '#A07840',
+                                          paddingVertical: 5,
+                                          paddingHorizontal: 12,
+                                          borderRadius: 2,
+                                          flexDirection: 'row',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                        }}
+                                      >
+                                        <FontAwesome5 name="check" size={8} color="#000" />
+                                        <Text style={{ color: '#000', fontSize: 8.5, fontWeight: '700' }}>
+                                          {idiomaActual.startsWith('es') ? 'APROBAR' : 'APPROVE'}
+                                        </Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          handleRechazarPropiedadDesdeNotif(notif);
+                                        }}
+                                        style={{
+                                          backgroundColor: 'rgba(239,68,68,0.15)',
+                                          paddingVertical: 5,
+                                          paddingHorizontal: 12,
+                                          borderRadius: 2,
+                                          borderWidth: 1,
+                                          borderColor: 'rgba(239,68,68,0.3)',
+                                          flexDirection: 'row',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                        }}
+                                      >
+                                        <FontAwesome5 name="times" size={8} color="#EF4444" />
+                                        <Text style={{ color: '#EF4444', fontSize: 8.5, fontWeight: '700' }}>
+                                          {idiomaActual.startsWith('es') ? 'RECHAZAR' : 'REJECT'}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  </View>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
+
+                          {/* ═══ SECCIÓN: NOTIFICACIONES REGULARES ═══ */}
+                          {regulares.length > 0 && isAdminOrMod && pendientes.length > 0 && (
+                            <View style={{ 
+                              paddingVertical: 8, 
+                              paddingHorizontal: 12, 
+                              backgroundColor: '#151515',
+                              borderBottomWidth: 1,
+                              borderBottomColor: 'rgba(255,255,255,0.05)',
+                            }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <FontAwesome5 name="bell" size={9} color="#888" />
+                                <Text style={{ color: '#888', fontSize: 9, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>
+                                  {idiomaActual.startsWith('es') ? 'Otras Notificaciones' : 'Other Notifications'}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+
+                          {regulares.length === 0 && pendientes.length === 0 ? (
+                            <View style={{ padding: 20, alignItems: 'center' }}>
+                              <Text style={{ color: '#888', fontSize: 11, fontStyle: 'italic' }}>
+                                {idiomaActual.startsWith('es') ? 'Sin notificaciones' : 'No notifications'}
+                              </Text>
+                            </View>
+                          ) : (
+                            regulares.map((notif, idx) => (
+                              <TouchableOpacity 
+                                key={notif.id || idx}
+                                onPress={() => handleNotifPress(notif)}
+                                style={{ 
+                                  paddingVertical: 10,
+                                  paddingHorizontal: 12,
+                                  borderBottomWidth: idx < regulares.length - 1 ? 1 : 0, 
+                                  borderBottomColor: 'rgba(255,255,255,0.05)', 
+                                  backgroundColor: !notif.leido ? 'rgba(160,120,64,0.06)' : 'transparent',
+                                  borderLeftWidth: !notif.leido ? 3 : 0,
+                                  borderLeftColor: '#A07840',
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                }}
+                              >
+                                <View style={{ flex: 1, paddingRight: 8 }}>
+                                  <Text style={{ color: !notif.leido ? '#A07840' : '#fff', fontSize: 10, fontWeight: '700', marginBottom: 2 }}>
+                                    {idiomaActual.startsWith('es') ? notif.titulo : notif.tituloEn}
+                                  </Text>
+                                  <Text style={{ color: '#aaa', fontSize: 10, lineHeight: 14 }}>
+                                    {idiomaActual.startsWith('es') ? notif.descripcion : notif.descripcionEn}
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                  {!notif.leido && (
+                                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#A07840' }} />
+                                  )}
+                                  <TouchableOpacity 
+                                    onPress={(e) => {
+                                      e.stopPropagation();
+                                      borrarNotificacion(notif.id);
+                                    }}
+                                    style={{ padding: 4 }}
+                                  >
+                                    <Feather name="trash-2" size={11} color="#C05050" style={{ opacity: 0.8 }} />
+                                  </TouchableOpacity>
+                                </View>
+                              </TouchableOpacity>
+                            ))
+                          )}
+                        </>
+                      );
+                    })()}
+                  </ScrollView>
                 </Animated.View>
               )}
             </View>
@@ -867,6 +1665,103 @@ function MainApp() {
       </Animated.ScrollView>
       </Animated.View>
       </View>
+
+      {showNotifRejectModal && (
+        <View style={{
+          position: 'absolute',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.85)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 99999,
+          ...Platform.select({
+            web: { position: 'fixed' },
+            default: {}
+          })
+        }}>
+          <View style={{
+            backgroundColor: '#121212',
+            borderWidth: 1,
+            borderColor: 'rgba(160,120,64,0.3)',
+            padding: 24,
+            width: '90%',
+            maxWidth: 400,
+            borderRadius: 4,
+          }}>
+            <Text style={{
+              fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+              fontSize: 16,
+              color: '#fff',
+              letterSpacing: 2,
+              marginBottom: 12,
+              textAlign: 'center',
+            }}>{idiomaActual.startsWith('es') ? 'RECHAZAR PUBLICACIÓN' : 'REJECT PROPERTY'}</Text>
+            <Text style={{
+              fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+              fontSize: 12,
+              color: '#8A8A84',
+              lineHeight: 18,
+              marginBottom: 20,
+              textAlign: 'center',
+            }}>
+              {idiomaActual.startsWith('es') 
+                ? 'Ingresa el motivo por el cual se rechaza esta publicación. Este motivo le aparecerá al vendedor en sus notificaciones.'
+                : 'Enter the reason for rejecting this property. This reason will appear to the seller in their notifications.'}
+            </Text>
+            <TextInput
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                borderWidth: 1,
+                borderColor: 'rgba(160,120,64,0.15)',
+                color: '#fff',
+                fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+                fontSize: 13,
+                padding: 12,
+                minHeight: 80,
+                marginBottom: 20,
+              }}
+              value={notifRejectReason}
+              onChangeText={setNotifRejectReason}
+              placeholder={idiomaActual.startsWith('es') ? 'Motivo del rechazo...' : 'Reason for rejection...'}
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+            <View style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}>
+              <TouchableOpacity 
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                  borderRadius: 2,
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.15)',
+                }} 
+                onPress={() => { setShowNotifRejectModal(false); setNotifRejectProp(null); }}
+              >
+                <Text style={{ color: '#8A8A84', fontSize: 11, fontWeight: '600', letterSpacing: 1 }}>{idiomaActual.startsWith('es') ? 'Cancelar' : 'Cancel'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                  borderRadius: 2,
+                  backgroundColor: '#EF4444',
+                }} 
+                onPress={confirmRechazoDesdeNotif}
+              >
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>{idiomaActual.startsWith('es') ? 'Confirmar Rechazo' : 'Confirm Rejection'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

@@ -160,6 +160,23 @@ export default function VerPropiedad({ propiedadId, onVolver, onStartChat, onNav
     } catch (e) { console.error(e); }
   };
 
+  const handleRechazarPropiedad = async () => {
+    const msgPrompt = esES ? 'Ingresa el motivo del rechazo:' : 'Enter the reason for rejection:';
+    let motivo = '';
+    if (Platform.OS === 'web') {
+      motivo = window.prompt(msgPrompt);
+    } else {
+      motivo = esES ? 'No cumple con las políticas de la plataforma' : 'Does not meet platform guidelines';
+    }
+    
+    if (motivo === null) return; // Cancelled
+    if (motivo.trim() === '') {
+      motivo = esES ? 'No especificado' : 'Not specified';
+    }
+    
+    await handleCambiarEstatus(`rechazada|${motivo.trim()}`);
+  };
+
   const cambiarImagenActiva = (nuevoIdx) => {
     if (nuevoIdx === imagenActiva) return;
     Animated.timing(galleryFadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
@@ -346,19 +363,70 @@ export default function VerPropiedad({ propiedadId, onVolver, onStartChat, onNav
             <View style={s.sidebarColumn}>
               <View style={s.sidebarCard}>
                 
-                {(esPropietario || esAdminOMod) && (
-                  <View style={s.ownerStatusContainer}>
-                    <Text style={s.ownerStatusTitle}>{esES ? 'ESTATUS DE LA PROPIEDAD' : 'PROPERTY STATUS'}</Text>
-                    <View style={s.ownerStatusRow}>
-                      {['Disponible', 'En trato', 'Vendida'].map(st => (
-                        <TouchableOpacity key={st} onPress={() => handleCambiarEstatus(st)} style={[s.statusBtn, estatus === st && s.statusBtnActive]}>
-                          <Text style={[s.statusBtnText, estatus === st && s.statusBtnTextActive]}>{st}</Text>
-                        </TouchableOpacity>
-                      ))}
+                {(esPropietario || esAdminOMod) && (() => {
+                  const isRechazada = estatus && estatus.startsWith('rechazada');
+                  const rejectReason = isRechazada ? estatus.split('|')[1] || '' : '';
+                  return (
+                    <View style={s.ownerStatusContainer}>
+                      {estatus === 'pendiente' && (
+                        <View style={{ backgroundColor: 'rgba(160,120,64,0.1)', padding: 10, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(160,120,64,0.2)', alignItems: 'center' }}>
+                          <Text style={{ color: T.gold, fontSize: 10.5, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', fontFamily: T.sans }}>
+                            {esES ? 'Pendiente de Autorización' : 'Pending Authorization'}
+                          </Text>
+                        </View>
+                      )}
+
+                      {isRechazada && (
+                        <View style={{ backgroundColor: 'rgba(239,68,68,0.1)', padding: 10, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)', alignItems: 'center' }}>
+                          <Text style={{ color: '#EF4444', fontSize: 10.5, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', fontFamily: T.sans, marginBottom: 4 }}>
+                            {esES ? 'Publicación Rechazada' : 'Listing Rejected'}
+                          </Text>
+                          {rejectReason ? (
+                            <Text style={{ color: '#aaa', fontSize: 10, fontFamily: T.sans, textAlign: 'center' }}>
+                              {esES ? `Motivo: ${rejectReason}` : `Reason: ${rejectReason}`}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )}
+
+                      {esAdminOMod && (estatus === 'pendiente' || isRechazada) && (
+                        <View style={{ gap: 8, marginBottom: 12 }}>
+                          <TouchableOpacity 
+                            activeOpacity={0.8}
+                            onPress={() => handleCambiarEstatus('Disponible')} 
+                            style={{ backgroundColor: '#A07840', paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', borderRadius: 2 }}
+                          >
+                            <Text style={{ color: '#000', fontSize: 11, fontWeight: '700', fontFamily: T.sans, letterSpacing: 1 }}>
+                              {esES ? 'APROBAR / AUTORIZAR PUBLICACIÓN' : 'APPROVE / AUTHORIZE LISTING'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {estatus === 'pendiente' && (
+                            <TouchableOpacity 
+                              activeOpacity={0.8}
+                              onPress={handleRechazarPropiedad} 
+                              style={{ backgroundColor: '#EF4444', paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', borderRadius: 2 }}
+                            >
+                              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700', fontFamily: T.sans, letterSpacing: 1 }}>
+                                {esES ? 'RECHAZAR PUBLICACIÓN' : 'REJECT LISTING'}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+
+                      <Text style={s.ownerStatusTitle}>{esES ? 'ESTATUS DE LA PROPIEDAD' : 'PROPERTY STATUS'}</Text>
+                      <View style={s.ownerStatusRow}>
+                        {['Disponible', 'En trato', 'Vendida'].map(st => (
+                          <TouchableOpacity key={st} onPress={() => handleCambiarEstatus(st)} style={[s.statusBtn, estatus === st && s.statusBtnActive]}>
+                            <Text style={[s.statusBtnText, estatus === st && s.statusBtnTextActive]}>{st}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <View style={s.sidebarDivider} />
                     </View>
-                    <View style={s.sidebarDivider} />
-                  </View>
-                )}
+                  );
+                })()}
 
                 {/* HEADER PREMIUM DEL AGENTE */}
                 <View style={s.agentPremiumHeader}>
@@ -386,18 +454,30 @@ export default function VerPropiedad({ propiedadId, onVolver, onStartChat, onNav
 
                 <View style={s.sidebarDivider} />
 
-                <View style={s.quickForm}>
-                  <Text style={s.formTitle}>CONSULTA DIRECTA</Text>
-                  <TextInput
-                    style={[s.formInput, s.formTextArea]}
-                    multiline
-                    value={mensaje}
-                    onChangeText={setMensaje}
-                  />
-                  <TouchableOpacity activeOpacity={0.8} onPress={handleEnviarMensaje} {...hoverProps(setHoveredEnviar)} style={[s.submitBtn, hoveredEnviar && s.submitBtnHover]}>
-                    <Text style={s.submitBtnText}>{t('vp_form_enviar', { defaultValue: 'ENVIAR MENSAJE' })}</Text>
-                  </TouchableOpacity>
-                </View>
+                {esPropietario ? (
+                  <View style={[s.quickForm, { backgroundColor: 'rgba(160,120,64,0.05)', borderWidth: 1, borderColor: 'rgba(160,120,64,0.2)', padding: 16, alignItems: 'center' }]}>
+                    <Feather name="home" size={24} color="#A07840" style={{ marginBottom: 8 }} />
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700', fontFamily: T.sans, textAlign: 'center', marginBottom: 4 }}>
+                      {i18n.language?.startsWith('es') ? 'TU PUBLICACIÓN' : 'YOUR LISTING'}
+                    </Text>
+                    <Text style={{ color: '#aaa', fontSize: 10, textAlign: 'center', lineHeight: 14, fontFamily: T.sans }}>
+                      {i18n.language?.startsWith('es') ? 'Esta propiedad fue publicada por ti. No puedes enviarte mensajes a ti mismo.' : 'This property was listed by you. You cannot send messages to yourself.'}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={s.quickForm}>
+                    <Text style={s.formTitle}>CONSULTA DIRECTA</Text>
+                    <TextInput
+                      style={[s.formInput, s.formTextArea]}
+                      multiline
+                      value={mensaje}
+                      onChangeText={setMensaje}
+                    />
+                    <TouchableOpacity activeOpacity={0.8} onPress={handleEnviarMensaje} {...hoverProps(setHoveredEnviar)} style={[s.submitBtn, hoveredEnviar && s.submitBtnHover]}>
+                      <Text style={s.submitBtnText}>{t('vp_form_enviar', { defaultValue: 'ENVIAR MENSAJE' })}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {/* ID de propiedad — SOLO visible para Admin y Moderadores */}
                 {esAdminOMod && (

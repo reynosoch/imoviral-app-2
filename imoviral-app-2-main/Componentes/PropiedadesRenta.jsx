@@ -420,8 +420,24 @@ export default function PropiedadesRenta({ onVolver, onVerPropiedad, onNavigate,
           .in('tipo_transaccion', ['Renta', 'Ambas'])
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
-          setPropiedades(data);
+        if (!error && data) {
+          const filtered = data.filter(p => {
+            const isAvailable = !p.estatus || p.estatus === 'Disponible';
+            if (isAvailable) return true;
+            
+            const isUserAdmin = user?.isAdmin || user?.email === 'ventas@inmoviral.com.mx' || user?.id === 'admin-id-0000';
+            const isUserMod = user?.isModerator || user?.user_metadata?.role === 'moderator';
+            const isOwner = user && p.user_id === user.id;
+            
+            if (isUserAdmin || isUserMod || isOwner) return true;
+            return false;
+          });
+
+          if (filtered.length > 0) {
+            setPropiedades(filtered);
+          } else {
+            setPropiedades(FALLBACK);
+          }
         } else {
           setPropiedades(FALLBACK);
         }

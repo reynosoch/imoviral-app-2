@@ -429,10 +429,22 @@ export default function PropiedadesVenta({ onVolver, onVerPropiedad, soloRemates
         const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && data) {
-          if (data.length === 0 && soloRemates) {
+          const filtered = data.filter(p => {
+            const isAvailable = !p.estatus || p.estatus === 'Disponible';
+            if (isAvailable) return true;
+            
+            const isUserAdmin = user?.isAdmin || user?.email === 'ventas@inmoviral.com.mx' || user?.id === 'admin-id-0000';
+            const isUserMod = user?.isModerator || user?.user_metadata?.role === 'moderator';
+            const isOwner = user && p.user_id === user.id;
+            
+            if (isUserAdmin || isUserMod || isOwner) return true;
+            return false;
+          });
+
+          if (filtered.length === 0 && soloRemates) {
             setPropiedades([]);
-          } else if (data.length > 0) {
-            setPropiedades(data);
+          } else if (filtered.length > 0) {
+            setPropiedades(filtered);
           } else {
             setPropiedades(FALLBACK);
           }

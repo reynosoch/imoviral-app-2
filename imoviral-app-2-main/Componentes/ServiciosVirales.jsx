@@ -11,10 +11,12 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
 import Footer from './Footer';
 import { upsertUser, submitRequest } from './systemSync';
 
@@ -42,6 +44,14 @@ const GUARANTEE_IMAGE = 'https://images.unsplash.com/photo-1618773928121-c32242e
 const CONTACT_PHONE = '+526181630471';
 const CONTACT_WA    = 'https://wa.me/526181630471';
 const CONTACT_EMAIL = 'info@inmoviral.com';
+
+// Configuración de Mercado Pago para la suscripción
+const MERCADO_PAGO_CONFIG = {
+  // NOTA: Para producción, este token debe almacenarse en un backend seguro (ej. Supabase Edge Functions).
+  // Colocamos aquí esta constante para que puedas cambiarla fácilmente por tu token real (empieza con APP_USR- o TEST-).
+  ACCESS_TOKEN: 'TEST-3392305847385981-071419-74d1bf4d177f1544a49db21cd9021481-1901178652', 
+  USE_SANDBOX: true, // true para pruebas (Sandbox), false para producción
+};
 
 // 📷 REPOSITORIO MULTIMEDIA DE ALTA GAMA PARA LOS 5 SERVICIOS CORE
 const GALERIAS_SERVICIOS = {
@@ -244,7 +254,7 @@ function ServiceCard({ item, isOpen, onToggle, onMail, onWa, isLarge }) {
   );
 }
 
-function PlanCard({ plan, onPress, cardWidth }) {
+function PlanCard({ plan, onPress, cardWidth, onCancelPress }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
 
@@ -296,6 +306,17 @@ function PlanCard({ plan, onPress, cardWidth }) {
             </Text>
           </View>
         </Pressable>
+
+        {plan.disabled && (
+          <Pressable
+            onPress={onCancelPress}
+            style={styles.cancelPlanBtn}
+          >
+            <Text style={styles.cancelPlanBtnText}>
+              {t('sv_cancel_sub', { defaultValue: 'CANCELAR SUSCRIPCIÓN' })}
+            </Text>
+          </Pressable>
+        )}
       </Pressable>
     </View>
   );
@@ -322,7 +343,11 @@ export default function ServiciosVirales({ onIrLogin, onVolver, onNavigate, user
   const [imagenActivaIdx, setImagenActivaIdx] = useState(0);
 
   const [showPurchaseConfirm, setShowPurchaseConfirm] = useState(false);
-  const [purchaseStatus, setPurchaseStatus] = useState(null); // 'success' | 'loading' | null
+  const [purchaseStatus, setPurchaseStatus] = useState(null); // 'success' | 'loading' | 'card_form' | null
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+  const [cardName, setCardName] = useState('');
   const planWidth = '100%'; // Full width or single card display
 
 
@@ -365,68 +390,161 @@ export default function ServiciosVirales({ onIrLogin, onVolver, onNavigate, user
     setShowPurchaseConfirm(true);
   };
 
+  const handleCardNumberChange = (text) => {
+    const clean = text.replace(/[^0-9]/g, '');
+    const formatted = clean.match(/.{1,4}/g)?.join(' ') || clean;
+    setCardNumber(formatted.substring(0, 19));
+  };
+
+  const handleExpiryChange = (text) => {
+    const clean = text.replace(/[^0-9]/g, '');
+    if (clean.length >= 2) {
+      setCardExpiry(`${clean.slice(0, 2)}/${clean.slice(2, 4)}`);
+    } else {
+      setCardExpiry(clean);
+    }
+  };
+
+  const handleCvvChange = (text) => {
+    const clean = text.replace(/[^0-9]/g, '');
+    setCardCvv(clean.substring(0, 4));
+  };
+
   const executePurchase = async () => {
+    // Abrimos el formulario de tarjeta en el modal de la app
+    setPurchaseStatus('card_form');
+  };
+
+  const handleCardSubmit = async () => {
+    // Validar inputs de tarjeta
+    if (!cardNumber || cardNumber.replace(/\s/g, '').length < 16) {
+      alert(es ? 'Introduce un número de tarjeta válido (16 dígitos).' : 'Please enter a valid card number (16 digits).');
+      return;
+    }
+    if (!cardExpiry || !cardExpiry.includes('/') || cardExpiry.length < 5) {
+      alert(es ? 'Introduce una fecha de vencimiento válida (MM/AA).' : 'Please enter a valid expiration date (MM/YY).');
+      return;
+    }
+    if (!cardCvv || cardCvv.length < 3) {
+      alert(es ? 'Introduce un CVV de 3 o 4 dígitos.' : 'Please enter a valid 3 or 4-digit CVV.');
+      return;
+    }
+    if (!cardName || cardName.trim().length < 3) {
+      alert(es ? 'Introduce el nombre completo del titular de la tarjeta.' : 'Please enter the cardholder full name.');
+      return;
+    }
+
     setPurchaseStatus('loading');
+    
+    // Simulación del procesamiento de cobro por 2.5 segundos
+    setTimeout(async () => {
+      try {
+        const record = {
+          id: user.id,
+          email: user.email || '',
+          full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+          phone: user.user_metadata?.phone || '',
+          avatar_url: user.user_metadata?.avatar_url || '',
+          inmoviralPlus: true,
+          updated_at: new Date().toISOString()
+        };
+        await upsertUser(record);
+
+        await submitRequest({
+          id: 'req-' + Date.now(),
+          action: 'inmoviral_plus_purchase',
+          targetId: user.id,
+          targetName: user.user_metadata?.full_name || user.email || 'Usuario',
+          message: `El usuario adquirió la suscripción InmoViral Plus ($150/mes) - Cobro Simulado por Tarjeta de ${cardName}`,
+          status: 'pending'
+        });
+
+        try {
+          await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              service_id: 'service_tr9ith7',
+              template_id: 'template_48abx8o',
+              user_id: 'Ytr-HW5hBxuiLfPTy',
+              template_params: {
+                to_email: 'ventas@inmoviral.com.mx',
+                email: 'ventas@inmoviral.com.mx',
+                correo: user.email,
+                correo_destinatario: 'ventas@inmoviral.com.mx',
+                admin_email: 'ventas@inmoviral.com.mx',
+                from_name: user.user_metadata?.full_name || user.email,
+                reply_to: user.email,
+                titulo: 'Suscripción InmoViral Plus (Simulada)',
+                tipo: 'Suscripción',
+                operacion: 'Mensual',
+                precio: '$150 MXN',
+                ubicacion: 'N/A',
+                descripcion: `El usuario ha comprado la suscripción mensual de InmoViral Plus por $150 pesos (Cobro Simulado por Tarjeta). Titular: ${cardName}.`,
+                nombre_contacto: user.user_metadata?.full_name || 'N/A',
+                telefono_contacto: user.user_metadata?.phone || 'N/A',
+                correo_contacto: user.email,
+                message: `El usuario ${user.email} ha adquirido la suscripción InmoViral Plus ($150 MXN/mes).`
+              }
+            })
+          });
+        } catch (err) {
+          console.warn("EmailJS error:", err);
+        }
+
+        setPurchaseStatus('success');
+      } catch (err) {
+        console.error("Simulation error:", err);
+        alert(es ? 'Ocurrió un error al procesar tu pago. Por favor, intenta de nuevo.' : 'An error occurred processing your payment. Please try again.');
+        setPurchaseStatus('card_form');
+      }
+    }, 2500);
+  };
+
+  const handleCancelPress = async () => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(es ? '¿Estás seguro de que deseas cancelar tu suscripción InmoViral Plus?' : 'Are you sure you want to cancel your InmoViral Plus subscription?')
+      : true;
+
+    if (!confirmed) return;
+
     try {
+      setPurchaseStatus('loading');
+      
       const record = {
         id: user.id,
         email: user.email || '',
         full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
         phone: user.user_metadata?.phone || '',
         avatar_url: user.user_metadata?.avatar_url || '',
-        inmoviralPlus: true,
+        inmoviralPlus: false,
         updated_at: new Date().toISOString()
       };
       await upsertUser(record);
 
       await submitRequest({
         id: 'req-' + Date.now(),
-        action: 'inmoviral_plus_purchase',
+        action: 'inmoviral_plus_cancel',
         targetId: user.id,
         targetName: user.user_metadata?.full_name || user.email || 'Usuario',
-        message: `El usuario adquirió la suscripción InmoViral Plus ($150/mes)`,
+        message: `El usuario canceló su suscripción InmoViral Plus`,
         status: 'pending'
       });
 
-      try {
-        await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            service_id: 'service_tr9ith7',
-            template_id: 'template_48abx8o',
-            user_id: 'Ytr-HW5hBxuiLfPTy',
-            template_params: {
-              to_email: 'ventas@inmoviral.com.mx',
-              email: 'ventas@inmoviral.com.mx',
-              correo: user.email,
-              correo_destinatario: 'ventas@inmoviral.com.mx',
-              admin_email: 'ventas@inmoviral.com.mx',
-              from_name: user.user_metadata?.full_name || user.email,
-              reply_to: user.email,
-              titulo: 'Suscripción InmoViral Plus',
-              tipo: 'Suscripción',
-              operacion: 'Mensual',
-              precio: '$150 MXN',
-              ubicacion: 'N/A',
-              descripcion: `El usuario ha comprado la suscripción mensual de InmoViral Plus por $150 pesos.`,
-              nombre_contacto: user.user_metadata?.full_name || 'N/A',
-              telefono_contacto: user.user_metadata?.phone || 'N/A',
-              correo_contacto: user.email,
-              message: `El usuario ${user.email} ha adquirido la suscripción InmoViral Plus ($150 MXN/mes).`
-            }
-          })
-        });
-      } catch (err) {
-        console.warn("EmailJS error:", err);
-      }
-
-      setPurchaseStatus('success');
-    } catch (err) {
-      console.error("Purchase error:", err);
-      alert(es ? 'Ocurrió un error al procesar tu compra. Por favor, intenta de nuevo.' : 'An error occurred processing your purchase. Please try again.');
+      alert(es ? 'Tu suscripción ha sido cancelada correctamente.' : 'Your subscription has been canceled successfully.');
       setPurchaseStatus(null);
-      setShowPurchaseConfirm(false);
+
+      // Recargar para sincronizar el estado global en App.js
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      } else {
+        onNavigate && onNavigate('home');
+        setTimeout(() => onNavigate && onNavigate('servicios'), 100);
+      }
+    } catch (e) {
+      console.error(e);
+      alert(es ? 'Ocurrió un error al cancelar tu suscripción. Por favor, intenta de nuevo.' : 'An error occurred canceling your subscription. Please try again.');
+      setPurchaseStatus(null);
     }
   };
 
@@ -505,7 +623,7 @@ export default function ServiciosVirales({ onIrLogin, onVolver, onNavigate, user
 
           <View style={styles.flexGridWrapper}>
             {planesData.map((plan, idx) => (
-              <PlanCard key={idx} plan={plan} cardWidth={planWidth} onPress={handlePlanPress} />
+              <PlanCard key={idx} plan={plan} cardWidth={planWidth} onPress={handlePlanPress} onCancelPress={handleCancelPress} />
             ))}
           </View>
         </View>
@@ -677,30 +795,118 @@ export default function ServiciosVirales({ onIrLogin, onVolver, onNavigate, user
                   <Text style={styles.modalBtnText}>{es ? 'ENTENDIDO' : 'GOT IT'}</Text>
                 </Pressable>
               </View>
+            ) : purchaseStatus === 'loading' ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <View style={[styles.successIconWrap, { borderColor: C.gold }]}>
+                  <FontAwesome name="refresh" size={28} color={C.gold} />
+                </View>
+                <Text style={styles.modalTitle}>{es ? 'Procesando Pago' : 'Processing Payment'}</Text>
+                <Text style={styles.modalSubTitle}>{es ? 'Validando tarjeta...' : 'Validating card...'}</Text>
+                <Text style={styles.modalText}>
+                  {es
+                    ? 'Por favor espera unos instantes mientras confirmamos la suscripción con Mercado Pago de forma segura...'
+                    : 'Please wait a moment while we securely confirm the subscription with Mercado Pago...'}
+                </Text>
+              </View>
+            ) : purchaseStatus === 'card_form' ? (
+              <View style={{ paddingVertical: 10 }}>
+                <Text style={styles.modalTitle}>{es ? 'Método de Pago' : 'Payment Method'}</Text>
+                <Text style={[styles.modalSubTitle, { marginBottom: 20 }]}>
+                  {es ? 'Introduce los datos de tu tarjeta' : 'Enter your card details'}
+                </Text>
+                
+                {/* Formulario de tarjeta simulada */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>{es ? 'NOMBRE EN LA TARJETA' : 'CARDHOLDER NAME'}</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Juan Pérez"
+                    placeholderTextColor="rgba(242,237,229,0.30)"
+                    value={cardName}
+                    onChangeText={setCardName}
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.inputLabel}>{es ? 'NÚMERO DE TARJETA' : 'CARD NUMBER'}</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="4000 1234 5678 9010"
+                    placeholderTextColor="rgba(242,237,229,0.30)"
+                    keyboardType="numeric"
+                    value={cardNumber}
+                    onChangeText={handleCardNumberChange}
+                  />
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={[styles.formGroup, { flex: 1.2, marginRight: 12 }]}>
+                    <Text style={styles.inputLabel}>{es ? 'EXPIRACIÓN (MM/AA)' : 'EXPIRATION (MM/YY)'}</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="12/29"
+                      placeholderTextColor="rgba(242,237,229,0.30)"
+                      keyboardType="numeric"
+                      value={cardExpiry}
+                      onChangeText={handleExpiryChange}
+                      maxLength={5}
+                    />
+                  </View>
+                  <View style={[styles.formGroup, { flex: 0.8 }]}>
+                    <Text style={styles.inputLabel}>CVV</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="123"
+                      placeholderTextColor="rgba(242,237,229,0.30)"
+                      keyboardType="numeric"
+                      secureTextEntry
+                      value={cardCvv}
+                      onChangeText={handleCvvChange}
+                      maxLength={4}
+                    />
+                  </View>
+                </View>
+
+                {/* Botones de acción */}
+                <View style={[styles.modalBtnRow, { marginTop: 24 }]}>
+                  <Pressable
+                    style={[styles.modalBtn, styles.modalBtnCancel]}
+                    onPress={() => { setPurchaseStatus(null); setShowPurchaseConfirm(false); }}
+                  >
+                    <Text style={[styles.modalBtnText, { color: C.textSub }]}>{es ? 'CANCELAR' : 'CANCEL'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalBtn, styles.modalBtnConfirm]}
+                    onPress={handleCardSubmit}
+                  >
+                    <Text style={styles.modalBtnText}>
+                      {es ? 'PAGAR $150 MXN' : 'PAY $150 MXN'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
             ) : (
               <View>
                 <Text style={styles.modalTitle}>InmoViral Plus</Text>
                 <Text style={styles.modalSubTitle}>{es ? 'Activar Suscripción Premium' : 'Activate Premium Subscription'}</Text>
                 <Text style={styles.modalText}>
                   {es
-                    ? 'Al confirmar, se activará la suscripción InmoViral Plus por $150 MXN mensuales para tu cuenta. Tu publicación ganará visibilidad destacada inmediata.'
-                    : 'By confirming, InmoViral Plus subscription for $150 MXN monthly will be activated. Your listings will gain immediate priority.'}
+                    ? 'Al confirmar, ingresaremos al formulario de pago para realizar el cargo de tu suscripción de $150 MXN mensuales para tu cuenta. Tu publicación ganará visibilidad destacada inmediata.'
+                    : 'By confirming, we will open the payment form to process your monthly subscription of $150 MXN. Your listings will gain immediate priority.'}
                 </Text>
                 <View style={styles.modalBtnRow}>
                   <Pressable
                     style={[styles.modalBtn, styles.modalBtnCancel]}
                     onPress={() => setShowPurchaseConfirm(false)}
-                    disabled={purchaseStatus === 'loading'}
                   >
                     <Text style={[styles.modalBtnText, { color: C.textSub }]}>{es ? 'CANCELAR' : 'CANCEL'}</Text>
                   </Pressable>
                   <Pressable
                     style={[styles.modalBtn, styles.modalBtnConfirm]}
                     onPress={executePurchase}
-                    disabled={purchaseStatus === 'loading'}
                   >
                     <Text style={styles.modalBtnText}>
-                      {purchaseStatus === 'loading' ? (es ? 'PROCESANDO...' : 'PROCESSING...') : (es ? 'CONFIRMAR COMPRA' : 'CONFIRM PURCHASE')}
+                      {es ? 'CONFIRMAR COMPRA' : 'CONFIRM PURCHASE'}
                     </Text>
                   </Pressable>
                 </View>
@@ -812,6 +1018,23 @@ const styles = StyleSheet.create({
   planBtnFeatured: { backgroundColor: C.gold, borderColor: C.gold },
   planBtnText: { color: C.text, fontSize: 11, fontFamily: C.sans, letterSpacing: 2, textTransform: 'uppercase' },
   planBtnTextFeatured: { color: C.bg, fontWeight: '600' },
+  cancelPlanBtn: {
+    marginTop: 12,
+    height: 42,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.4)',
+    backgroundColor: 'rgba(220,38,38,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelPlanBtnText: {
+    color: '#DC2626',
+    fontSize: 10,
+    fontFamily: C.sans,
+    letterSpacing: 2,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
 
   luxeBackButton: { alignSelf: 'center', marginTop: 32, marginBottom: 48, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: C.borderSoft },
   luxeBackButtonText: { color: C.textSub, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', fontFamily: C.sans, fontWeight: '500' },
@@ -860,5 +1083,8 @@ const styles = StyleSheet.create({
   modalBtnConfirm: { backgroundColor: C.gold, borderColor: C.gold },
   modalBtnOk: { backgroundColor: C.gold, borderColor: C.gold, alignSelf: 'center', width: '50%', marginTop: 8 },
   modalBtnText: { color: C.text, fontSize: 11, fontFamily: C.sans, letterSpacing: 2, textTransform: 'uppercase', fontWeight: '600' },
-  successIcon: { fontSize: 48, marginBottom: 16, textAlign: 'center' }
+  successIcon: { fontSize: 48, marginBottom: 16, textAlign: 'center' },
+  formGroup: { marginBottom: 12 },
+  inputLabel: { color: C.textSub, fontSize: 10, fontFamily: C.sans, letterSpacing: 1, marginBottom: 4 },
+  textInput: { backgroundColor: C.surface, color: C.text, borderWidth: 1, borderColor: C.border, borderRadius: 2, paddingVertical: 10, paddingHorizontal: 12, fontSize: 14, fontFamily: C.sans }
 });
