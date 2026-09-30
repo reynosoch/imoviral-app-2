@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "INMOVIRAL",
+    "slug": "imoviral-app-2",
+    "version": "1.0.0",
+    "scheme": "imoviralapp2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#141210"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#141210"
+      },
+      "package": "com.inmoviral.imoviralapp2"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./public/favicon.png",
+      "name": "INMOVIRAL",
+      "shortName": "INMOVIRAL",
+      "description": "Propiedades exclusivas de lujo en México.",
+      "themeColor": "#141210",
+      "backgroundColor": "#141210"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2d23cc55-b178-4e6c-8010-542dc80632e4"
+      }
+    },
+    "owner": "inmoviral",
+    "plugins": [
+      "expo-web-browser"
+    ]
+  }
+}
