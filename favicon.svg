@@ -1,0 +1,11 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo cuadrado oscuro -->
+  <rect width="512" height="512" fill="#141210"/>
+  <!-- Letra I serif dorada — legible incluso a 16px -->
+  <!-- Barra horizontal superior -->
+  <rect x="156" y="108" width="200" height="44" fill="#c9a869"/>
+  <!-- Barra vertical central -->
+  <rect x="226" y="152" width="60" height="208" fill="#c9a869"/>
+  <!-- Barra horizontal inferior -->
+  <rect x="156" y="360" width="200" height="44" fill="#c9a869"/>
+</svg>
