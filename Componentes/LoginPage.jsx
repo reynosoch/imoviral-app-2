@@ -131,7 +131,7 @@ export default function LoginPage({ onVolver }) {
               : 'Please enter a valid email address.'
           );
         }
-        const redirectUrl = Platform.OS === 'web' ? window.location.origin : undefined;
+        const redirectUrl = Platform.OS === 'web' ? `${window.location.origin}${window.location.pathname}` : undefined;
         const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: redirectUrl,
         });

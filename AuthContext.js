@@ -100,7 +100,7 @@ export const AuthProvider = ({ children }) => {
 
   const signInWithGoogle = async () => {
     const redirectTo = Platform.OS === 'web'
-      ? `${window.location.origin}/auth/callback`
+      ? `${window.location.origin}${window.location.pathname}`
       : AuthSession.makeRedirectUri({ scheme: 'imoviralapp2', path: 'auth/callback' });
 
     const { data, error } = await supabase.auth.signInWithOAuth({

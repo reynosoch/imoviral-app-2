@@ -27,7 +27,7 @@
       "favicon": "./public/favicon.png",
       "name": "INMOVIRAL",
       "shortName": "INMOVIRAL",
-      "description": "Propiedades exclusivas de lujo en México.",
+      "description": "Propiedades exclusivas de lujo en M\u00e9xico.",
       "themeColor": "#141210",
       "backgroundColor": "#141210"
     },
@@ -39,6 +39,9 @@
     "owner": "inmoviral",
     "plugins": [
       "expo-web-browser"
-    ]
+    ],
+    "experiments": {
+      "baseUrl": "/imoviral-app-2"
+    }
   }
 }

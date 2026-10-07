@@ -19,3 +19,26 @@ Aplicación web inmobiliaria desarrollada con React. Incluye autenticación glob
 * `/Componentes`: Módulos e interfaz de usuario.
 * `/locales`: Archivos de traducción.
 * `AuthContext.js`: Manejo de sesiones y autenticación.
+
+## GitHub Pages
+
+Sitio: https://reynosoch.github.io/imoviral-app-2/
+
+El proyecto que se compila es el de la raíz del repositorio. La carpeta
+`imoviral-app-2-main/` es una copia y no se usa en el despliegue.
+
+1. En Settings → Pages, selecciona **GitHub Actions** como Source.
+2. El workflow **Deploy GitHub Pages** compila y publica cada push a `main`.
+   También se puede ejecutar desde Actions → Run workflow.
+3. Para verificar la exportación local: `npm ci` y `npm run build:web`.
+
+Expo usa `experiments.baseUrl` para servir scripts, imágenes y fuentes bajo
+`/imoviral-app-2`. El archivo `.nojekyll` permite servir el directorio `_expo`.
+
+Para Google y los enlaces de autenticación, agrega
+`https://reynosoch.github.io/imoviral-app-2/` a las Redirect URLs en
+Supabase → Authentication → URL Configuration. El código web regresa a la
+URL de la aplicación; el callback nativo se mantiene.
+
+`npm run deploy` sigue disponible como alternativa manual que publica `dist`
+en `gh-pages`; requiere configurar Pages para esa rama en lugar de Actions.
