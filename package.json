@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "predeploy": "npm run build:web",
     "deploy": "gh-pages -d dist --dotfiles",
-    "build:web": "expo export -p web"
+    "build:web": "expo export -p web",
+    "build:web:root": "node scripts/build-web-root.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
