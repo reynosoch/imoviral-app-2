@@ -68,8 +68,14 @@ La configuración dinámica vive en `app.config.js`:
 Para Cloudflare Workers/Pages usa:
 
 - **Build command:** `npm run build:web:root`
-- **Output directory:** `dist`
+- **Deploy command:** `npx wrangler deploy`
+- **Worker:** `tiny-mouse-5277`
 - **Custom domain:** `inmoviral.site`
+
+El despliegue de Cloudflare usa `wrangler.jsonc` con `assets.directory = "./dist"` y
+`not_found_handling = "single-page-application"`. Por eso **no debe existir**
+`public/_redirects`: la regla SPA ya la resuelve Wrangler y un fallback manual tipo
+`/* /index.html 200` provoca un bucle inválido en Workers Static Assets.
 
 No se creó una landing paralela: el dominio raíz sirve la misma aplicación real del
 repositorio, incluyendo la home, propiedades, soluciones, autenticación y demás
