@@ -44,3 +44,36 @@ Supabase → Authentication → URL Configuration. El código web regresa a la
 URL de la aplicación; el callback nativo se mantiene.
 
 `npm run deploy` sigue disponible para publicar manualmente `dist` en `gh-pages`.
+
+## inmoviral.site / dominio raíz
+
+La misma aplicación y landing real de InmoViral puede exportarse para un dominio
+raíz sin romper el despliegue existente de GitHub Pages.
+
+```bash
+npm ci
+npm run build:web:root
+```
+
+Ese comando genera `dist/` con `experiments.baseUrl` vacío, por lo que scripts,
+imágenes y fuentes funcionan correctamente en `https://inmoviral.site/` en vez de
+quedar amarrados a `/imoviral-app-2`.
+
+La configuración dinámica vive en `app.config.js`:
+
+- build normal (`npm run build:web`) → conserva `/imoviral-app-2` para GitHub Pages;
+- build raíz (`npm run build:web:root`) → usa `/` para `inmoviral.site` o cualquier
+  otro custom domain.
+
+Para Cloudflare Workers/Pages usa:
+
+- **Build command:** `npm run build:web:root`
+- **Output directory:** `dist`
+- **Custom domain:** `inmoviral.site`
+
+No se creó una landing paralela: el dominio raíz sirve la misma aplicación real del
+repositorio, incluyendo la home, propiedades, soluciones, autenticación y demás
+funcionalidad existente.
+
+El workflow **Verify web targets** valida en cada push a `main` tanto el build de
+GitHub Pages como el build de dominio raíz para evitar romper uno al habilitar el otro.
